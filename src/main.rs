@@ -1,33 +1,36 @@
 use std::env;
-use futures::{
-  future::{Future},
-};
-use failure::Error;
+//use std::error::Error;
 
-//use tokio::runtime::Runtime;
+use futures::future::Future;
 
-#[macro_use] extern crate failure;
+use tokio::runtime::Runtime;
 
 use s3::bucket::Bucket;
 use s3::region::Region;
 use s3::credentials::Credentials;
-//use s3::error::S3Error;
+use s3::error::S3Error;
 
 fn get_bucket_list(
   bucket: &s3::bucket::Bucket,
   path: &str,
-) -> Box<dyn Future<Item = String, Error = Error> + Send> {
+) -> Box<dyn Future<Item = String, Error = S3Error> + Send> {
   let fut = bucket.list_all_async(path.to_string(), Some("/".to_string()))
     .map(|res| {
       res.into_iter()
-        .flat_map(|a| a.contents.into_iter().map(|o| o.key.to_string()))
-        .collect();
-    })
-    .map_err(|_e| format_err!("Error listing bucket"));
-  Box::new(fut);
+        .flat_map(|a| a.contents.into_iter().map(|o| {
+          println!("{}", o.key.to_string());
+          o.key.to_string()
+        }))
+        .collect()
+    });
+  Box::new(fut)
 }
 
-fn main() -> Result<(), std::io::Error> {
+fn main() {
+  // Create the runtime
+  let mut runtime = Runtime::new().unwrap();
+  let executor = runtime.executor();
+
   let args: Vec<String> = env::args().collect();
   println!("{:?}", args);
 
@@ -42,13 +45,13 @@ fn main() -> Result<(), std::io::Error> {
 
   let bucket = Bucket::new(bucket_name, region, credentials).unwrap();
 
-  get_bucket_list(&bucket, &"/".to_string())
-    .map_err(|_|
-      println!("coucou");
-    )
-    .map(|list|
-      println!("{}", list);
-    );
+  let f = get_bucket_list(&bucket, &"/".to_string()).wait().map(|data| {
+    println!("success: {:?}", data)
+  }).map_err(|e| {
+    println!("{:?}", e);
+  });
+
+  executor.spawn(f);
 
   Ok(());
 }
