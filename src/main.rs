@@ -2,6 +2,8 @@ use std::env;
 //use std::error::Error;
 
 use futures::future::Future;
+use s3::serde_types::Object;
+//use futures::future::IntoFuture;
 
 use tokio::runtime::Runtime;
 
@@ -13,22 +15,18 @@ use s3::error::S3Error;
 fn get_bucket_list(
   bucket: &s3::bucket::Bucket,
   path: &str,
-) -> Box<dyn Future<Item = String, Error = S3Error> + Send> {
+) -> Box<dyn Future<Item = Vec<Object>, Error = S3Error> + Send> {
   let fut = bucket.list_all_async(path.to_string(), Some("/".to_string()))
     .map(|res| {
       res.into_iter()
-        .flat_map(|a| a.contents.into_iter().map(|o| {
-          println!("{}", o.key.to_string());
-          o.key.to_string()
-        }))
+        .flat_map(|a| a.contents)
         .collect()
     });
   Box::new(fut)
 }
 
 fn main() {
-  // Create the runtime
-  let mut runtime = Runtime::new().unwrap();
+  let runtime = Runtime::new().unwrap();
   let executor = runtime.executor();
 
   let args: Vec<String> = env::args().collect();
@@ -45,14 +43,12 @@ fn main() {
 
   let bucket = Bucket::new(bucket_name, region, credentials).unwrap();
 
-  let f = get_bucket_list(&bucket, &"/".to_string()).wait().map(|data| {
-    println!("success: {:?}", data)
+  let f = get_bucket_list(&bucket, &"".to_string()).map(|data| {
+    data.into_iter().map(|a| println!("{} {}, {} - {}", a.last_modified, a.key, a.e_tag, a.size)).collect()
   }).map_err(|e| {
     println!("{:?}", e);
   });
 
   executor.spawn(f);
-
-  Ok(());
+  runtime.shutdown_on_idle().wait().unwrap();
 }
-
