@@ -19,7 +19,8 @@ use rusoto_core::credential::{AwsCredentials, StaticProvider};
 use rusoto_core::{Region, RusotoError};
 //use rusoto_s3::util::{PreSignedRequest, PreSignedRequestOption};
 use rusoto_s3::{
-   S3, S3Client, ListBucketsOutput,
+   S3, S3Client, ListBucketsOutput, Bucket, ListObjectsV2Request, Object, ListObjectsV2Output,
+   //ListObjectsV2Error,
 };
 
 fn main() {
@@ -37,7 +38,7 @@ fn main() {
     endpoint: endpoint.to_owned(),
   };
 
-  let access_key = "blabal".to_string();
+  let access_key = "blabla".to_string();
   let secret_key = "blibli".to_string();
 
   let client = S3Client::new_with(
@@ -47,11 +48,43 @@ fn main() {
   );
 
   loop {
-    let fut = S3::list_buckets(&client).then(|x| {
-      match x {
-        Ok(ListBucketsOutput { buckets, owner: _ }) => {
+    let fut = client.list_buckets().then(move |resp| {
+      match resp {
+        Ok(ListBucketsOutput { buckets, .. }) => {
           match buckets {
-            Some(_buckets) => println!("buckets"),
+            Some(_buckets) => {
+              let _buckets = _buckets.iter()
+                .map(|bucket| {
+                  println!("{:?}", bucket);
+                  let list_obj_req = ListObjectsV2Request {
+                    bucket: "apk".to_owned(),
+                    start_after: Some("foo".to_owned()),
+                    ..Default::default()
+                  };
+                  client.list_objects_v2(list_obj_req).then(move|resp| {
+                    match resp {
+                      Ok(ListObjectsV2Output { contents, .. }) => {
+                        match contents {
+                          Some(_objects) => {
+                            let _objects = _objects.iter()
+                              .map(|object| {
+                                println!("{:?}", object);
+                                object.clone()
+                              })
+                              .collect::<Vec<Object>>();
+                          }
+                          None => println!("none2")
+                        }
+                      }
+                      //Err(ListObjectsV2Error) => println!("ListObjectsV2Error"),
+                      Err(_error) => println!("yo")
+                    }
+                    Ok::<(),()>(())
+                  });
+                  bucket.clone()
+                })
+                .collect::<Vec<Bucket>>();
+            }
             None => println!("none")
           }
         }
@@ -67,7 +100,7 @@ fn main() {
     let datetime: DateTime<Utc> = system_time.into();
     println!("{}", datetime.format("%d/%m/%Y %T"));
 
-    let ten_millis = time::Duration::from_millis(1000);
+    let ten_millis = time::Duration::from_millis(5000);
     thread::sleep(ten_millis);
   }
   //runtime.shutdown_on_idle().wait().unwrap();
