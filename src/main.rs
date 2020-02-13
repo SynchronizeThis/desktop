@@ -1,54 +1,74 @@
 use std::env;
-//use std::error::Error;
 
-use futures::future::Future;
-use s3::serde_types::Object;
-//use futures::future::IntoFuture;
+use std::{thread, time};
+use std::time::SystemTime;
+//use std::result::Result;
+//use std::io::Error;
+//use std::future:Future;
+use crate::futures::Future;
+extern crate chrono;
+use chrono::offset::Utc;
+use chrono::DateTime;
 
 use tokio::runtime::Runtime;
+extern crate futures;
+extern crate tokio;
 
-use s3::bucket::Bucket;
-use s3::region::Region;
-use s3::credentials::Credentials;
-use s3::error::S3Error;
-
-fn get_bucket_list(
-  bucket: &s3::bucket::Bucket,
-  path: &str,
-) -> Box<dyn Future<Item = Vec<Object>, Error = S3Error> + Send> {
-  let fut = bucket.list_all_async(path.to_string(), Some("/".to_string()))
-    .map(|res| {
-      res.into_iter()
-        .flat_map(|a| a.contents)
-        .collect()
-    });
-  Box::new(fut)
-}
+//use rusoto_credential::ProvideAwsCredentials;
+use rusoto_core::credential::{AwsCredentials, StaticProvider};
+use rusoto_core::{Region, RusotoError};
+//use rusoto_s3::util::{PreSignedRequest, PreSignedRequestOption};
+use rusoto_s3::{
+   S3, S3Client, ListBucketsOutput,
+};
 
 fn main() {
-  let runtime = Runtime::new().unwrap();
-  let executor = runtime.executor();
-
   let args: Vec<String> = env::args().collect();
   println!("{:?}", args);
 
-  let bucket_name = "apk";
+  let runtime = Runtime::new().unwrap();
+  let executor = runtime.executor();
+
   let region_name = "".to_string();
   let endpoint = "https://cellar-c2.services.clever-cloud.com".to_string();
-  let region = Region::Custom { region: region_name, endpoint };
 
-  let access_key = String::from("blabla");
-  let secret_key = String::from("blibli");
-  let credentials = Credentials::new(Some(access_key), Some(secret_key), None, None);
+  let region = Region::Custom {
+    name: region_name.to_owned(),
+    endpoint: endpoint.to_owned(),
+  };
 
-  let bucket = Bucket::new(bucket_name, region, credentials).unwrap();
+  let access_key = "blabal".to_string();
+  let secret_key = "blibli".to_string();
 
-  let f = get_bucket_list(&bucket, &"".to_string()).map(|data| {
-    data.into_iter().map(|a| println!("{} {}, {} - {}", a.last_modified, a.key, a.e_tag, a.size)).collect()
-  }).map_err(|e| {
-    println!("{:?}", e);
-  });
+  let client = S3Client::new_with(
+    rusoto_core::request::HttpClient::new().expect("Failed to create HTTP client"),
+    StaticProvider::from(AwsCredentials::new(access_key.clone(), secret_key.clone(), None, None)),
+    region.clone(),
+  );
 
-  executor.spawn(f);
-  runtime.shutdown_on_idle().wait().unwrap();
+  loop {
+    let fut = S3::list_buckets(&client).then(|x| {
+      match x {
+        Ok(ListBucketsOutput { buckets, owner: _ }) => {
+          match buckets {
+            Some(_buckets) => println!("buckets"),
+            None => println!("none")
+          }
+        }
+        Err(RusotoError::Unknown(e)) => println!("{}", e.body_as_str()),
+        Err(_error) => println!("yo")
+      }
+      Ok::<(),()>(())
+    });
+
+    executor.spawn(fut);
+
+    let system_time = SystemTime::now();
+    let datetime: DateTime<Utc> = system_time.into();
+    println!("{}", datetime.format("%d/%m/%Y %T"));
+
+    let ten_millis = time::Duration::from_millis(1000);
+    thread::sleep(ten_millis);
+  }
+  //runtime.shutdown_on_idle().wait().unwrap();
 }
